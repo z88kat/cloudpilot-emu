@@ -351,6 +351,10 @@ void SocPXA::OnEngageKey(KeyId key, bool down) {
     keypadKeyEvt(kp, key, down);
 }
 
+void SocPXA::OnTypeChar(uint8_t ch) { deviceTypeChar(dev, ch); }
+
+bool SocPXA::HasKeyboard() { return deviceHasKeyboard(dev); }
+
 void SocPXA::OnReset() {
     pxaLcdResetPaletteBuffer(lcd);
     if (nand) nandResetPageBuffer(nand);

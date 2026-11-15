@@ -69,6 +69,9 @@ struct Device {
     enum DeviceType5 GetType() const { return type; }
 
     virtual void Key(uint32_t key, bool down) {}
+    // Devices with a hardware keyboard translate typed characters into key presses.
+    virtual bool HasKeyboard() const { return false; }
+    virtual void TypeChar(uint8_t ch) {}
     virtual void Periodic(uint32_t tier) {}
     virtual void PcmPeriodic() {}
     virtual void Touch(int x, int y) = 0;
@@ -113,6 +116,8 @@ struct Device *deviceSetupTungstenC(struct SocPeriphs *sp, struct GetEmuTime get
 struct Device *deviceSetupTungstenT3(struct SocPeriphs *sp, struct Keypad *kp);
 
 inline void deviceKey(struct Device *dev, uint32_t key, bool down) { dev->Key(key, down); }
+inline bool deviceHasKeyboard(struct Device *dev) { return dev->HasKeyboard(); }
+inline void deviceTypeChar(struct Device *dev, uint8_t ch) { dev->TypeChar(ch); }
 inline void devicePeriodic(struct Device *dev, uint32_t tier) { dev->Periodic(tier); }
 inline void devicePcmPeriodic(struct Device *dev) { dev->PcmPeriodic(); }
 inline void deviceTouch(struct Device *dev, int x, int y) { dev->Touch(x, y); }

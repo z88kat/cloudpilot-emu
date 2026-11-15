@@ -196,6 +196,8 @@ void SocPV::OnTouch(int x, int y) { pvTouchUpdate(touch, x, y); }
 
 void SocPV::OnEngageKey(KeyId key, bool down) { pvKeysEngage(keys, key, down); }
 
+void SocPV::OnTypeChar(uint8_t ch) {}
+
 void SocPV::OnReset() {}
 
 void SocPV::OnLoad(SavestateLoader<ChunkType> &loader) {

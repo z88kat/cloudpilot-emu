@@ -41,6 +41,9 @@ class SoC {
 
     void KeyDown(enum KeyId key);
     void KeyUp(enum KeyId key);
+    // Type a character on a device with a hardware keyboard (see HasKeyboard). Characters
+    // the keyboard cannot produce are ignored.
+    void TypeChar(uint8_t ch);
     void PenDown(int x, int y);
     void PenUp();
 
@@ -93,6 +96,7 @@ class SoC {
     virtual void ResetPendingFrame() = 0;
     virtual DeviceType5 GetDeviceType() = 0;
     virtual DisplayMode GetDisplayMode() = 0;
+    virtual bool HasKeyboard() { return false; }
     virtual void SuspendTimerInterrupts(bool suspendInterrupts) = 0;
     virtual bool LcdEnabled() = 0;
 
@@ -121,9 +125,11 @@ class SoC {
     struct KeyEvent {
         bool keyDown;
         enum KeyId key;
+        uint8_t typedChar;  // nonzero: a character typed on the hardware keyboard
 
         static KeyEvent KeyDown(enum KeyId key);
         static KeyEvent KeyUp(enum KeyId key);
+        static KeyEvent TypedChar(uint8_t ch);
     };
 
    protected:

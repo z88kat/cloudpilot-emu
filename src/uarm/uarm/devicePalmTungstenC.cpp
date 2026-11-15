@@ -1,6 +1,7 @@
 //(c) uARM project    https://github.com/uARM-Palm/uARM    uARM@dmitry.gr
 
 #include <cstring>
+#include <deque>
 
 #include "ac97dev_UCB1400.h"
 #include "cputil.h"
@@ -13,14 +14,21 @@
 #define WIFI_MEM1_BASE 0x28000000ul
 #define WIFI_MEM2_BASE 0x20000000ul
 
-// matrix positions of the function and command keys
+// matrix positions of the modifier keys
 #define KEY_FUNCTION_ROW 11
 #define KEY_FUNCTION_COL 3
 #define KEY_COMMAND_ROW 1
 #define KEY_COMMAND_COL 2
+#define KEY_SHIFT_ROW 6
+#define KEY_SHIFT_COL 0
 
-// delay between the steps of the synthesized menu key sequence
-#define MENU_SEQUENCE_STEP_NSEC 50000000ull
+// Delay between synthesized key matrix transitions (typed characters and the menu key). The
+// OS drops keys if the matrix changes faster.
+#define KEY_STEP_NSEC 40000000ull
+
+// Upper bound for the synthesized key matrix transitions waiting to be played back. Typed
+// characters are dropped if the queue is full.
+#define MAX_PENDING_KEY_STEPS 1024
 
 /*
     Palm Tungsten C: PXA255, UCB1400 (AC97 codec + touch screen + ADC), 64MB RAM, 320x320
@@ -38,14 +46,22 @@
     18-27   keypad matrix row 0-9
     79, 80  keypad matrix row 10, 11
 
-    KEY MATRIX (row, col; the remaining positions are the keyboard)
+    KEY MATRIX (row, col)
     0, 0-3  application buttons: date book, address, versamail, web
-    1, 1    5-way down
-    1, 2    command
-    1, 3    5-way select
-    6, 3    home
-    11, 0-2 5-way up, left, right
-    11, 3   function
+    1, 0-3  x, 5-way down, command, 5-way select
+    2       unused
+    3, 0-3  tab, d, h, period
+    4, 0-3  a, c, y, l
+    5, 0-3  q, f, n, o
+    6, 0-3  shift, r, j, home
+    7, 0-3  z, space, u, return
+    8, 0-3  s, v, m, backspace
+    9, 0-3  w, g, k, p
+    10, 0-3 e, t, i, b
+    11, 0-3 5-way up, left, right, function
+
+    The function layer of the letter keys carries the digits and most punctuation, see
+    functionLayer below. Function + space opens the on-screen symbol keyboard.
 
     UCB1400 GPIO0: external power (active high)
     UCB1400 GPIO1: headphones (active high)
@@ -61,12 +77,19 @@ namespace {
         DeviceTungstenC(struct SocPeriphs *sp, struct GetEmuTime getEmuTime, struct Keypad *kp);
 
         void Key(uint32_t key, bool down) override {
-            if (key == keyIdMenu && down && menuSequenceStep == 0) StartMenuSequence();
+            // There is no menu button on the TC. The menu is opened by function + command,
+            // and the OS only recognizes the combination if function goes down first.
+            if (key == keyIdMenu && down)
+                QueueKeyStroke(MatrixKey{KEY_COMMAND_ROW, KEY_COMMAND_COL, Modifier::function});
         }
+
+        bool HasKeyboard() const override { return true; }
+
+        void TypeChar(uint8_t ch) override;
 
         void PcmPeriodic() override {
             ucb1400periodic(ucb1400);
-            if (menuSequenceStep != 0) AdvanceMenuSequence();
+            if (!keySteps.empty()) PlayKeySteps();
         }
 
         void Touch(int x, int y) override {
@@ -86,7 +109,7 @@ namespace {
 
         void Load(SavestateLoader<ChunkType> &loader) override {
             ucb1400Load(ucb1400, loader);
-            AbortMenuSequence();
+            AbortKeySteps();
 
             auto chunk =
                 loader.GetChunkOrFail(ChunkType::deviceTungstenC, SAVESTATE_VERSION, "TC device");
@@ -118,11 +141,28 @@ namespace {
 
         uint64_t GetTime() { return getEmuTime.getTimeF(getEmuTime.userdata); }
 
-        // There is no menu button on the TC. The menu is opened by function + command, and
-        // the OS only recognizes the combination if function goes down first.
-        void StartMenuSequence();
-        void AdvanceMenuSequence();
-        void AbortMenuSequence();
+        enum class Modifier : uint8_t { none, shift, function };
+
+        struct MatrixKey {
+            uint8_t row;
+            uint8_t col;
+            Modifier modifier;
+        };
+
+        struct KeyStep {
+            uint8_t row;
+            uint8_t col;
+            bool down;
+        };
+
+        static bool LookupChar(uint8_t ch, MatrixKey &key);
+
+        // Typed characters and the menu key are played back as a sequence of key matrix
+        // transitions with KEY_STEP_NSEC between them.
+        void QueueKeyStroke(const MatrixKey &key);
+        void PlayKeySteps();
+        void AbortKeySteps();
+        void SetMatrixKey(uint8_t row, uint8_t col, bool down);
 
        private:
         struct UCB1400 *ucb1400{nullptr};
@@ -130,8 +170,10 @@ namespace {
         struct Keypad *kp{nullptr};
         struct GetEmuTime getEmuTime;
 
-        uint32_t menuSequenceStep{0};
-        uint64_t menuSequenceNextStepAt{0};
+        std::deque<KeyStep> keySteps;
+        uint64_t nextKeyStepAt{0};
+        // matrix positions held down by the key step player, bit 4 * row + col
+        uint64_t keyStepsPressed{0};
 
         // the wifi module is not emulated, but the OS expects these two windows to be
         // backed by memory
@@ -154,39 +196,119 @@ namespace {
         return true;
     }
 
-    void DeviceTungstenC::StartMenuSequence() {
-        keypadMatrixKeyEvt(kp, KEY_FUNCTION_ROW, KEY_FUNCTION_COL, true);
+    // keyboard matrix positions of the letters a - z
+    const uint8_t letterKeys[26][2] = {
+        {4, 0}, {10, 3}, {4, 1}, {3, 1}, {10, 0}, {5, 1}, {9, 1}, {3, 2}, {10, 2},
+        {6, 2}, {9, 2},  {4, 3}, {8, 2}, {5, 2},  {5, 3}, {9, 3}, {5, 0}, {6, 1},
+        {8, 0}, {10, 1}, {7, 2}, {8, 1}, {9, 0},  {1, 0}, {4, 2}, {7, 0},
+    };
 
-        menuSequenceStep = 1;
-        menuSequenceNextStepAt = GetTime() + MENU_SEQUENCE_STEP_NSEC;
+    // characters on the function layer and the letter that carries them
+    const char functionLayer[][2] = {
+        {'1', 'q'}, {'2', 'w'}, {'3', 'e'}, {'4', 'r'}, {'5', 't'},  {'6', 'y'}, {'7', 'u'},
+        {'8', 'i'}, {'9', 'o'}, {'0', 'p'}, {':', 'a'}, {'!', 'b'},  {')', 'c'}, {'+', 'd'},
+        {'-', 'f'}, {'*', 'g'}, {'_', 'h'}, {'"', 'j'}, {'\'', 'k'}, {'@', 'l'}, {'?', 'm'},
+        {',', 'n'}, {'/', 's'}, {'#', 'v'}, {'$', 'z'}, {'(', 'x'},
+    };
+
+    bool DeviceTungstenC::LookupChar(uint8_t ch, MatrixKey &key) {
+        auto letter = [&](uint8_t c, Modifier modifier) {
+            key = {letterKeys[c - 'a'][0], letterKeys[c - 'a'][1], modifier};
+            return true;
+        };
+
+        if (ch >= 'a' && ch <= 'z') return letter(ch, Modifier::none);
+        if (ch >= 'A' && ch <= 'Z') return letter(ch - 'A' + 'a', Modifier::shift);
+
+        for (auto &mapping : functionLayer)
+            if (mapping[0] == ch) return letter(mapping[1], Modifier::function);
+
+        switch (ch) {
+            case '.':
+                key = {3, 3, Modifier::none};
+                return true;
+
+            case ' ':
+                key = {7, 1, Modifier::none};
+                return true;
+
+            case '\t':
+                key = {3, 0, Modifier::none};
+                return true;
+
+            case '\r':
+            case '\n':
+                key = {7, 3, Modifier::none};
+                return true;
+
+            case '\b':
+                key = {8, 3, Modifier::none};
+                return true;
+
+            default:
+                return false;
+        }
     }
 
-    void DeviceTungstenC::AdvanceMenuSequence() {
-        if (GetTime() < menuSequenceNextStepAt) return;
+    void DeviceTungstenC::TypeChar(uint8_t ch) {
+        MatrixKey key;
+        if (LookupChar(ch, key)) QueueKeyStroke(key);
+    }
 
-        switch (menuSequenceStep) {
-            case 1:
-                keypadMatrixKeyEvt(kp, KEY_COMMAND_ROW, KEY_COMMAND_COL, true);
+    void DeviceTungstenC::QueueKeyStroke(const MatrixKey &key) {
+        uint8_t modifierRow = 0, modifierCol = 0;
+        bool hasModifier = true;
+
+        switch (key.modifier) {
+            case Modifier::shift:
+                modifierRow = KEY_SHIFT_ROW;
+                modifierCol = KEY_SHIFT_COL;
                 break;
 
-            case 2:
-                keypadMatrixKeyEvt(kp, KEY_COMMAND_ROW, KEY_COMMAND_COL, false);
+            case Modifier::function:
+                modifierRow = KEY_FUNCTION_ROW;
+                modifierCol = KEY_FUNCTION_COL;
                 break;
 
             default:
-                AbortMenuSequence();
-                return;
+                hasModifier = false;
+                break;
         }
 
-        menuSequenceStep++;
-        menuSequenceNextStepAt += MENU_SEQUENCE_STEP_NSEC;
+        // If the player is idle, playback starts once KEY_STEP_NSEC have passed since the last
+        // transition (nextKeyStepAt is never ahead of the current time by more than that).
+        if (keySteps.size() + 4 > MAX_PENDING_KEY_STEPS) return;
+
+        if (hasModifier) keySteps.push_back({modifierRow, modifierCol, true});
+        keySteps.push_back({key.row, key.col, true});
+        keySteps.push_back({key.row, key.col, false});
+        if (hasModifier) keySteps.push_back({modifierRow, modifierCol, false});
     }
 
-    void DeviceTungstenC::AbortMenuSequence() {
-        keypadMatrixKeyEvt(kp, KEY_COMMAND_ROW, KEY_COMMAND_COL, false);
-        keypadMatrixKeyEvt(kp, KEY_FUNCTION_ROW, KEY_FUNCTION_COL, false);
+    void DeviceTungstenC::PlayKeySteps() {
+        if (GetTime() < nextKeyStepAt) return;
 
-        menuSequenceStep = 0;
+        const KeyStep step = keySteps.front();
+        keySteps.pop_front();
+
+        SetMatrixKey(step.row, step.col, step.down);
+        nextKeyStepAt = GetTime() + KEY_STEP_NSEC;
+    }
+
+    void DeviceTungstenC::AbortKeySteps() {
+        keySteps.clear();
+        // emulated time may have jumped backwards
+        nextKeyStepAt = 0;
+
+        for (uint8_t i = 0; i < 64; i++)
+            if (keyStepsPressed & (1ull << i)) SetMatrixKey(i >> 2, i & 0x03, false);
+    }
+
+    void DeviceTungstenC::SetMatrixKey(uint8_t row, uint8_t col, bool down) {
+        const uint64_t mask = 1ull << (4 * row + col);
+        keyStepsPressed = down ? keyStepsPressed | mask : keyStepsPressed & ~mask;
+
+        keypadMatrixKeyEvt(kp, row, col, down);
     }
 
     DeviceTungstenC::DeviceTungstenC(struct SocPeriphs *sp, struct GetEmuTime getEmuTime,
@@ -209,9 +331,8 @@ namespace {
         for (unsigned i = 0; i < sizeof(rowGpios); i++)
             if (!keypadDefineRow(kp, i, rowGpios[i])) ERR("Cannot init keypad rows");
 
-        // Only the hardware buttons are mapped, the keyboard is not. The TC has no dedicated
-        // home or menu button: home is a key on the keyboard, and keyIdMenu is synthesized as
-        // function + command, see StartMenuSequence.
+        // The hardware buttons and the home key are mapped to key IDs. The rest of the keyboard
+        // is driven by TypeChar, and keyIdMenu is synthesized as function + command, see Key.
         if (!keypadAddMatrixKey(kp, keyIdHard1, 0, 0) ||  // date book
             !keypadAddMatrixKey(kp, keyIdHard2, 0, 1) ||  // address
             !keypadAddMatrixKey(kp, keyIdHard3, 0, 2) ||  // versamail

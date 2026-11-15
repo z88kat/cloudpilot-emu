@@ -239,6 +239,12 @@ void SocGeneric<T>::PumpKeyEventQueue() {
 
     if (keyEventQueue->GetSize() > 0) {
         KeyEvent evt(keyEventQueue->Pop());
+
+        if (evt.typedChar != 0) {
+            static_cast<T&>(*this).OnTypeChar(evt.typedChar);
+            return;
+        }
+
         if (evt.key == jammedKey) return;
 
         static_cast<T&>(*this).OnEngageKey(evt.key, evt.keyDown);

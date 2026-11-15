@@ -207,17 +207,62 @@ The device is detected from the ROM. In addition to the devices supported by
 the web app, `cp-uarm` can run Tungsten C and Tungsten T3 ROMs:
 
 - The Tungsten C is emulated with 64MB of RAM and a 320x320 display without a
-  graffiti area. The application buttons (Date Book, Address, VersaMail, Web)
-  are mapped to F1 - F4 and the 5-way navigator to the cursor keys and enter.
-  As the Tungsten C has no silkscreen, Home is mapped to F5 (or the Home key)
-  and Menu to F6.
+  graffiti area. Its hardware keyboard is driven by the host keyboard, see
+  [below](#typing-on-the-tungsten-c).
 - The Tungsten T3 is emulated with 64MB of RAM and a 320x480 display with the
-  dynamic input area. The application buttons are mapped to F1 - F4, the
-  5-way navigator to the cursor keys and enter.
+  dynamic input area.
 
 On both devices touch input is translated directly to screen coordinates, so
 digitizer calibration during setup always succeeds. See
 [known issues](#known-issues-and-limitations) for the current limitations.
+
+### Keyboard mappings
+
+The emulator window maps these host keys to the device buttons:
+
+| Host key                | Device                                     | Devices                |
+| ----------------------- | ------------------------------------------ | ---------------------- |
+| F1 - F4                 | Application buttons 1 - 4                  | all                    |
+| Cursor keys             | 5-way navigator up / down / left / right   | all                    |
+| Return                  | 5-way select (Return types on the TC)      | all except Tungsten C  |
+| Keypad Enter            | 5-way select                               | all                    |
+| Escape                  | Power button                               | Tungsten E2, E3        |
+| F5 or Home              | Home                                       | Tungsten C             |
+| F6                      | Menu                                       | Tungsten C             |
+
+F1 - F4 follow the order of the buttons on the real device. On the
+Tungsten C, for example, they are Date Book, Address, VersaMail and Web. On
+Mac laptops, keypad Enter is fn + Return.
+
+### Typing on the Tungsten C
+
+The Tungsten C has a built-in QWERTY keyboard instead of a graffiti area. In
+`cp-uarm` you type on it with the host keyboard. Each character is converted to
+the key presses that produce it on the real device, including Shift or the
+blue Function key:
+
+- Letters a - z, space and period map to the keys with the same label.
+  Capital letters are typed with Shift. Like the real device, the OS
+  capitalizes the first letter after a period, `!` or `?` by itself.
+- Return, Backspace and Tab map to Return, Backspace and Tab on the device.
+  On the Tungsten C, use keypad Enter for 5-way select.
+- Digits and most punctuation live on the Function layer of the letter keys:
+
+  | Character | `1` | `2` | `3` | `4` | `5` | `6` | `7` | `8` | `9` | `0` |
+  | --------- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+  | Fn +      | Q   | W   | E   | R   | T   | Y   | U   | I   | O   | P   |
+
+  | Character | `:` | `!` | `)` | `+` | `-` | `*` | `_` | `"` | `'` | `@` | `?` | `,` | `/` | `#` | `$` | `(` |
+  | --------- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+  | Fn +      | A   | B   | C   | D   | F   | G   | H   | J   | K   | L   | M   | N   | S   | V   | Z   | X   |
+
+- The keyboard cannot produce other characters (for example `; = % & < > [ ] { } \ ^ ~ |`)
+  or anything outside ASCII, so the emulator ignores them. Enter them with
+  the on-screen keyboard instead: press F6 for the menu and choose
+  Edit → Keyboard.
+- The OS drops key presses that arrive too quickly. Characters are therefore
+  played back at about 12 per second (each key change is held for 40 ms of
+  emulated time), and fast typing shows up with a short delay.
 
 # Reporting issues
 
@@ -244,14 +289,16 @@ Please report issues on the [Github tracker](https://github.com/cloudpilot-emu/c
 - Formatting an unformatted memory stick in Clié devices that run PalmOS 3.x
   locks up PalmOS.
 - On OS5, keyboard input, clipboard and network integration are not
-  currently available.
+  currently available. The one exception is typing on the hardware keyboard
+  of the Tungsten C in `cp-uarm`.
 - The emulated Tungsten|W does not provide a full 5-way D-pad, even though
   the skin suggests otherwise.
 - There is no support for changing the hotsync user name on OS5. Please use
   MultiUserHack or a similar application for that.
-- Tungsten C: only available in the native `cp-uarm` app. The hardware
-  keyboard is not mapped (only the buttons, Home and Menu are), Wi-Fi is
-  not emulated, and boot takes about 30 seconds of emulated time at the default
+- Tungsten C: only available in the native `cp-uarm` app. Characters that
+  are not on the hardware keyboard cannot be typed directly (see
+  [above](#typing-on-the-tungsten-c)), the power and hotsync buttons are not
+  mapped, Wi-Fi is not emulated, and boot takes about 30 seconds of emulated time at the default
   speed of 100 MIPS (the real device runs at 400 MHz, use `--mips` to go
   faster).
 - Tungsten T3: only available in the native `cp-uarm` app. SD cards are not

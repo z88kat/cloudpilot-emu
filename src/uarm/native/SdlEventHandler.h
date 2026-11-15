@@ -26,6 +26,7 @@ class SdlEventHandler {
     SoC* soc;
 
     bool penDown{false};
+    bool hasKeyboard{false};
     int scale{1};
     bool redrawRequested{false};
     bool quitRequested{false};

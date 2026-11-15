@@ -48,6 +48,7 @@ class SocPXA : public SocGeneric<SocPXA> {
     void ResetPendingFrame() override;
     DeviceType5 GetDeviceType() override;
     DisplayMode GetDisplayMode() override;
+    bool HasKeyboard() override;
     void SuspendTimerInterrupts(bool suspendInterrupts) override;
     bool LcdEnabled() override;
 
@@ -66,6 +67,7 @@ class SocPXA : public SocGeneric<SocPXA> {
 
     void OnTouch(int x, int y);
     void OnEngageKey(KeyId key, bool down);
+    void OnTypeChar(uint8_t ch);
     void OnReset();
 
     void OnLoad(SavestateLoader<ChunkType> &loader);

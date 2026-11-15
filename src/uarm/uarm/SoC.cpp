@@ -19,8 +19,17 @@ using namespace std;
 SoC::PenEvent SoC::PenEvent::PenDown(int x, int y) { return {.penDown = true, .x = x, .y = y}; }
 SoC::PenEvent SoC::PenEvent::PenUp() { return {.penDown = false, .x = -1, .y = -1}; }
 
-SoC::KeyEvent SoC::KeyEvent::KeyDown(enum KeyId key) { return {.keyDown = true, .key = key}; }
-SoC::KeyEvent SoC::KeyEvent::KeyUp(enum KeyId key) { return {.keyDown = false, .key = key}; }
+SoC::KeyEvent SoC::KeyEvent::KeyDown(enum KeyId key) {
+    return {.keyDown = true, .key = key, .typedChar = 0};
+}
+
+SoC::KeyEvent SoC::KeyEvent::KeyUp(enum KeyId key) {
+    return {.keyDown = false, .key = key, .typedChar = 0};
+}
+
+SoC::KeyEvent SoC::KeyEvent::TypedChar(uint8_t ch) {
+    return {.keyDown = false, .key = keyInvalid, .typedChar = ch};
+}
 
 SoC::SoC()
     : savestate(make_unique<Savestate<ChunkType>>()),
@@ -37,6 +46,10 @@ SoC::SoC()
 void SoC::KeyDown(enum KeyId key) { keyEventQueue->Push(KeyEvent::KeyDown(key)); }
 
 void SoC::KeyUp(enum KeyId key) { keyEventQueue->Push(KeyEvent::KeyUp(key)); }
+
+void SoC::TypeChar(uint8_t ch) {
+    if (ch != 0) keyEventQueue->Push(KeyEvent::TypedChar(ch));
+}
 
 void SoC::PenDown(int x, int y) {
     penEventQueue->Push(PenEvent::PenDown(

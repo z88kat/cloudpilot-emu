@@ -32,6 +32,7 @@ namespace {
                 return keyIdDown;
 
             case SDLK_RETURN:
+            case SDLK_KP_ENTER:
                 return keyIdSelect;
 
             case SDLK_ESCAPE:
@@ -48,6 +49,23 @@ namespace {
                 return keyInvalid;
         }
     }
+
+    // On devices with a hardware keyboard these keys type instead of acting as buttons.
+    uint8_t mapTypedKey(SDL_Keycode keysym) {
+        switch (keysym) {
+            case SDLK_BACKSPACE:
+                return '\b';
+
+            case SDLK_RETURN:
+                return '\r';
+
+            case SDLK_TAB:
+                return '\t';
+
+            default:
+                return 0;
+        }
+    }
 }  // namespace
 
 SdlEventHandler::SdlEventHandler(SoC* soc, int scale,
@@ -56,6 +74,9 @@ SdlEventHandler::SdlEventHandler(SoC* soc, int scale,
     : soc(soc), scale(scale), rotation(rotation) {
     width = deviceDisplayConfiguration.width;
     height = deviceDisplayConfiguration.height + deviceDisplayConfiguration.graffitiHeight;
+
+    hasKeyboard = soc->HasKeyboard();
+    if (hasKeyboard) SDL_StartTextInput();
 }
 
 void SdlEventHandler::HandleEvents() {
@@ -91,16 +112,36 @@ void SdlEventHandler::HandleEvents() {
                 break;
 
             case SDL_KEYDOWN: {
+                const uint8_t typedKey = hasKeyboard ? mapTypedKey(event.key.keysym.sym) : 0;
+                if (typedKey) {
+                    soc->TypeChar(typedKey);
+                    break;
+                }
+
+                // Button presses are not repeated, the OS handles held buttons itself
+                if (event.key.repeat) break;
+
                 enum KeyId key = mapKey(event.key.keysym.sym);
                 if (key) soc->KeyDown(key);
                 break;
             }
 
             case SDL_KEYUP: {
+                if (hasKeyboard && mapTypedKey(event.key.keysym.sym)) break;
+
                 enum KeyId key = mapKey(event.key.keysym.sym);
                 if (key) soc->KeyUp(key);
                 break;
             }
+
+            case SDL_TEXTINPUT:
+                if (!hasKeyboard) break;
+
+                // UTF-8; only ASCII can be typed on the device
+                for (const char* c = event.text.text; *c; c++)
+                    if (static_cast<uint8_t>(*c) < 0x80) soc->TypeChar(*c);
+
+                break;
 
             case SDL_WINDOWEVENT_EXPOSED:
                 redrawRequested = true;
