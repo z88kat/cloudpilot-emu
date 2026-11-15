@@ -13,6 +13,15 @@
 #define WIFI_MEM1_BASE 0x28000000ul
 #define WIFI_MEM2_BASE 0x20000000ul
 
+// matrix positions of the function and command keys
+#define KEY_FUNCTION_ROW 11
+#define KEY_FUNCTION_COL 3
+#define KEY_COMMAND_ROW 1
+#define KEY_COMMAND_COL 2
+
+// delay between the steps of the synthesized menu key sequence
+#define MENU_SEQUENCE_STEP_NSEC 50000000ull
+
 /*
     Palm Tungsten C: PXA255, UCB1400 (AC97 codec + touch screen + ADC), 64MB RAM, 320x320
     display without a graffiti area, SD slot on the PXA MMC controller.
@@ -29,6 +38,15 @@
     18-27   keypad matrix row 0-9
     79, 80  keypad matrix row 10, 11
 
+    KEY MATRIX (row, col; the remaining positions are the keyboard)
+    0, 0-3  application buttons: date book, address, versamail, web
+    1, 1    5-way down
+    1, 2    command
+    1, 3    5-way select
+    6, 3    home
+    11, 0-2 5-way up, left, right
+    11, 3   function
+
     UCB1400 GPIO0: external power (active high)
     UCB1400 GPIO1: headphones (active high)
     UCB1400 GPIO3: speaker enable (active high)
@@ -40,9 +58,16 @@
 namespace {
     class DeviceTungstenC : public Device {
        public:
-        DeviceTungstenC(struct SocPeriphs *sp, struct Keypad *kp);
+        DeviceTungstenC(struct SocPeriphs *sp, struct GetEmuTime getEmuTime, struct Keypad *kp);
 
-        void PcmPeriodic() override { ucb1400periodic(ucb1400); }
+        void Key(uint32_t key, bool down) override {
+            if (key == keyIdMenu && down && menuSequenceStep == 0) StartMenuSequence();
+        }
+
+        void PcmPeriodic() override {
+            ucb1400periodic(ucb1400);
+            if (menuSequenceStep != 0) AdvanceMenuSequence();
+        }
 
         void Touch(int x, int y) override {
             const bool down = x >= 0 && y >= 0;
@@ -61,6 +86,7 @@ namespace {
 
         void Load(SavestateLoader<ChunkType> &loader) override {
             ucb1400Load(ucb1400, loader);
+            AbortMenuSequence();
 
             auto chunk =
                 loader.GetChunkOrFail(ChunkType::deviceTungstenC, SAVESTATE_VERSION, "TC device");
@@ -90,9 +116,22 @@ namespace {
         static bool WifiMemAccess(void *userData, uint32_t pa, uint_fast8_t size, bool write,
                                   void *buf);
 
+        uint64_t GetTime() { return getEmuTime.getTimeF(getEmuTime.userdata); }
+
+        // There is no menu button on the TC. The menu is opened by function + command, and
+        // the OS only recognizes the combination if function goes down first.
+        void StartMenuSequence();
+        void AdvanceMenuSequence();
+        void AbortMenuSequence();
+
        private:
         struct UCB1400 *ucb1400{nullptr};
         struct PxaGpio *gpio{nullptr};
+        struct Keypad *kp{nullptr};
+        struct GetEmuTime getEmuTime;
+
+        uint32_t menuSequenceStep{0};
+        uint64_t menuSequenceNextStepAt{0};
 
         // the wifi module is not emulated, but the OS expects these two windows to be
         // backed by memory
@@ -115,8 +154,47 @@ namespace {
         return true;
     }
 
-    DeviceTungstenC::DeviceTungstenC(struct SocPeriphs *sp, struct Keypad *kp)
-        : Device(DeviceType5::deviceTypeTungstenC), gpio(sp->gpio) {
+    void DeviceTungstenC::StartMenuSequence() {
+        keypadMatrixKeyEvt(kp, KEY_FUNCTION_ROW, KEY_FUNCTION_COL, true);
+
+        menuSequenceStep = 1;
+        menuSequenceNextStepAt = GetTime() + MENU_SEQUENCE_STEP_NSEC;
+    }
+
+    void DeviceTungstenC::AdvanceMenuSequence() {
+        if (GetTime() < menuSequenceNextStepAt) return;
+
+        switch (menuSequenceStep) {
+            case 1:
+                keypadMatrixKeyEvt(kp, KEY_COMMAND_ROW, KEY_COMMAND_COL, true);
+                break;
+
+            case 2:
+                keypadMatrixKeyEvt(kp, KEY_COMMAND_ROW, KEY_COMMAND_COL, false);
+                break;
+
+            default:
+                AbortMenuSequence();
+                return;
+        }
+
+        menuSequenceStep++;
+        menuSequenceNextStepAt += MENU_SEQUENCE_STEP_NSEC;
+    }
+
+    void DeviceTungstenC::AbortMenuSequence() {
+        keypadMatrixKeyEvt(kp, KEY_COMMAND_ROW, KEY_COMMAND_COL, false);
+        keypadMatrixKeyEvt(kp, KEY_FUNCTION_ROW, KEY_FUNCTION_COL, false);
+
+        menuSequenceStep = 0;
+    }
+
+    DeviceTungstenC::DeviceTungstenC(struct SocPeriphs *sp, struct GetEmuTime getEmuTime,
+                                     struct Keypad *kp)
+        : Device(DeviceType5::deviceTypeTungstenC),
+          gpio(sp->gpio),
+          kp(kp),
+          getEmuTime(getEmuTime) {
         ucb1400 = ucb1400Init(sp->ac97, sp->gpio, 3);
         if (!ucb1400) ERR("Cannot init UCB1400");
 
@@ -131,7 +209,19 @@ namespace {
         for (unsigned i = 0; i < sizeof(rowGpios); i++)
             if (!keypadDefineRow(kp, i, rowGpios[i])) ERR("Cannot init keypad rows");
 
-        if (!keypadAddMatrixKey(kp, keyIdHard1, 4, 0)) ERR("Cannot init hardkey1 (datebook)\n");
+        // Only the hardware buttons are mapped, the keyboard is not. The TC has no dedicated
+        // home or menu button: home is a key on the keyboard, and keyIdMenu is synthesized as
+        // function + command, see StartMenuSequence.
+        if (!keypadAddMatrixKey(kp, keyIdHard1, 0, 0) ||  // date book
+            !keypadAddMatrixKey(kp, keyIdHard2, 0, 1) ||  // address
+            !keypadAddMatrixKey(kp, keyIdHard3, 0, 2) ||  // versamail
+            !keypadAddMatrixKey(kp, keyIdHard4, 0, 3) ||  // web
+            !keypadAddMatrixKey(kp, keyIdUp, 11, 0) || !keypadAddMatrixKey(kp, keyIdDown, 1, 1) ||
+            !keypadAddMatrixKey(kp, keyIdLeft, 11, 1) ||
+            !keypadAddMatrixKey(kp, keyIdRight, 11, 2) ||
+            !keypadAddMatrixKey(kp, keyIdSelect, 1, 3) ||
+            !keypadAddMatrixKey(kp, keyIdHome, 6, 3))
+            ERR("Cannot init keypad keys");
 
         if (!memRegionAdd(sp->mem, WIFI_MEM1_BASE, WIFI_MEM_SIZE, WifiMemAccess, wifiMem1) ||
             !memRegionAdd(sp->mem, WIFI_MEM2_BASE, WIFI_MEM_SIZE, WifiMemAccess, wifiMem2))
@@ -152,6 +242,7 @@ namespace {
     }
 }  // namespace
 
-struct Device *deviceSetupTungstenC(struct SocPeriphs *sp, struct Keypad *kp) {
-    return new DeviceTungstenC(sp, kp);
+struct Device *deviceSetupTungstenC(struct SocPeriphs *sp, struct GetEmuTime getEmuTime,
+                                    struct Keypad *kp) {
+    return new DeviceTungstenC(sp, getEmuTime, kp);
 }

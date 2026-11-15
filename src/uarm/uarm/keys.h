@@ -20,7 +20,9 @@ enum KeyId {
     keyIdLeft = 7,
     keyIdRight = 8,
     keyIdSelect = 9,
-    keyIdPower = 10
+    keyIdPower = 10,
+    keyIdHome = 11,
+    keyIdMenu = 12
 };
 
 struct Keypad *keypadInit(struct PxaGpio *gpio, bool matrixHasPullUps);
@@ -30,6 +32,10 @@ bool keypadAddGpioKey(struct Keypad *kp, enum KeyId key, int8_t gpioNum, bool ac
 bool keypadAddMatrixKey(struct Keypad *kp, enum KeyId key, unsigned row, unsigned col);
 
 void keypadKeyEvt(struct Keypad *kp, enum KeyId key, bool wentDown);
+
+// Press or release a matrix position directly, independent of the key ids. Used by devices
+// that synthesize key sequences.
+void keypadMatrixKeyEvt(struct Keypad *kp, unsigned row, unsigned col, bool wentDown);
 
 void keypadReset(struct Keypad *kp);
 

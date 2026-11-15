@@ -157,6 +157,13 @@ void keypadKeyEvt(struct Keypad *kp, enum KeyId key, bool wentDown) {
     keypadPrvMatrixRecalc(kp);
 }
 
+void keypadMatrixKeyEvt(struct Keypad *kp, unsigned row, unsigned col, bool wentDown) {
+    if (row >= MAX_KP_ROWS || col >= MAX_KP_COLS) return;
+
+    kp->km[row][col].isDown = wentDown;
+    keypadPrvMatrixRecalc(kp);
+}
+
 void keypadReset(struct Keypad *kp) {
     int i, j;
 

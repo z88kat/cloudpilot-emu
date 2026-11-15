@@ -41,6 +41,8 @@ export const enum KeyId {
     keyIdRight = 8,
     keyIdSelect = 9,
     keyIdPower = 10,
+    keyIdHome = 11,
+    keyIdMenu = 12,
 }
 
 export const enum DisplayMode {

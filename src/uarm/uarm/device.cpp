@@ -77,7 +77,7 @@ struct Device *deviceSetup(enum DeviceType5 type, struct SocPeriphs *sp,
                                          nandSize, nandPageBuffer);
 
         case DeviceType5::deviceTypeTungstenC:
-            return deviceSetupTungstenC(sp, kp);
+            return deviceSetupTungstenC(sp, getEmuTime, kp);
 
         case DeviceType5::deviceTypeTungstenT3:
             return deviceSetupTungstenT3(sp, kp);

@@ -108,7 +108,8 @@ struct Device *deviceSetupTungstenE2(enum DeviceType5 type, struct SocPeriphs *s
                                      struct Reschedule reschedule, struct GetEmuTime getEmuTime,
                                      struct Keypad *kp, struct VSD *vsd, uint8_t *nandContent,
                                      size_t nandSize, const struct MemoryBuffer *nandPageBuffer);
-struct Device *deviceSetupTungstenC(struct SocPeriphs *sp, struct Keypad *kp);
+struct Device *deviceSetupTungstenC(struct SocPeriphs *sp, struct GetEmuTime getEmuTime,
+                                    struct Keypad *kp);
 struct Device *deviceSetupTungstenT3(struct SocPeriphs *sp, struct Keypad *kp);
 
 inline void deviceKey(struct Device *dev, uint32_t key, bool down) { dev->Key(key, down); }

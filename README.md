@@ -207,7 +207,10 @@ The device is detected from the ROM. In addition to the devices supported by
 the web app, `cp-uarm` can run Tungsten C and Tungsten T3 ROMs:
 
 - The Tungsten C is emulated with 64MB of RAM and a 320x320 display without a
-  graffiti area.
+  graffiti area. The application buttons (Date Book, Address, VersaMail, Web)
+  are mapped to F1 - F4 and the 5-way navigator to the cursor keys and enter.
+  As the Tungsten C has no silkscreen, Home is mapped to F5 (or the Home key)
+  and Menu to F6.
 - The Tungsten T3 is emulated with 64MB of RAM and a 320x480 display with the
   dynamic input area. The application buttons are mapped to F1 - F4, the
   5-way navigator to the cursor keys and enter.
@@ -246,8 +249,8 @@ Please report issues on the [Github tracker](https://github.com/cloudpilot-emu/c
   the skin suggests otherwise.
 - There is no support for changing the hotsync user name on OS5. Please use
   MultiUserHack or a similar application for that.
-- Tungsten C: only available in the native `cp-uarm` app. Of the keyboard and
-  hardware buttons only the first application button (F1) is mapped, Wi-Fi is
+- Tungsten C: only available in the native `cp-uarm` app. The hardware
+  keyboard is not mapped (only the buttons, Home and Menu are), Wi-Fi is
   not emulated, and boot takes about 30 seconds of emulated time at the default
   speed of 100 MIPS (the real device runs at 400 MHz, use `--mips` to go
   faster).

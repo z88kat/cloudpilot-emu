@@ -37,6 +37,13 @@ namespace {
             case SDLK_ESCAPE:
                 return keyIdPower;
 
+            case SDLK_F5:
+            case SDLK_HOME:
+                return keyIdHome;
+
+            case SDLK_F6:
+                return keyIdMenu;
+
             default:
                 return keyInvalid;
         }
