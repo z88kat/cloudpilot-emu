@@ -6,6 +6,7 @@
 
 #include <cstddef>
 #include <cstdlib>
+#include <cstring>
 
 #include "CPU.h"
 #include "RAM.h"
@@ -62,6 +63,19 @@
 #define PCM_HZ_ENABLED 44300
 #define PCM_HZ_DISABLED (44100 / 3)
 
+#define RAM_WRITE_IGNORE_SIZE 256
+
+namespace {
+    // RAM termination for devices that probe RAM size by writing past the end of RAM: reads
+    // return zero, writes are ignored
+    bool ramWriteIgnoreAccess(void *userData, uint32_t pa, uint_fast8_t size, bool write,
+                              void *buf) {
+        if (!write) memset(buf, 0, size);
+
+        return true;
+    }
+}  // namespace
+
 SocPXA::SocPXA(enum DeviceType5 deviceType, uint32_t ramSize, void *romData, const uint32_t romSize,
                uint8_t *nandContent, size_t nandSize, int gdbPort, uint_fast8_t socRev) {
     RomInfo5 romInfo(romData, romSize);
@@ -70,6 +84,7 @@ SocPXA::SocPXA(enum DeviceType5 deviceType, uint32_t ramSize, void *romData, con
     struct GetEmuTime getEmuTime = {.getTimeF = GetTimeCB, .userdata = this};
 
     this->socRev = socRev;
+    this->deviceType = deviceType;
 
     if (ramSize == 0) ramSize = 16 << 20;
     if (!deviceConfigurationSupportsRamSize(deviceType, ramSize))
@@ -88,7 +103,8 @@ SocPXA::SocPXA(enum DeviceType5 deviceType, uint32_t ramSize, void *romData, con
     patchDispatchSetCpu(patchDispatch, cpu);
 
     syscallDispatch = initSyscallDispatch(this);
-    patchContext = registerPatches(patchDispatch, syscallDispatch, cpu, systemState);
+    patchContext = registerPatches(patchDispatch, syscallDispatch, cpu, systemState,
+                                   PATCH_FEATURE_ALL, deviceGetPenTranslation(deviceType));
 
     ram = ramInit(mem, this, RAM_BASE, ramSize, &bufferMemory, true);
     rom = romInit(mem, ROM_BASE, romData, romSize);
@@ -101,7 +117,7 @@ SocPXA::SocPXA(enum DeviceType5 deviceType, uint32_t ramSize, void *romData, con
 
     vSD = vsdInit(sdCardRead, sdCardWrite, 0);
 
-    switch (deviceGetRamTerminationStyle()) {
+    switch (deviceGetRamTerminationStyle(deviceType)) {
         case RamTerminationMirror:
 
             // ram mirror for ram probe code
@@ -109,7 +125,9 @@ SocPXA::SocPXA(enum DeviceType5 deviceType, uint32_t ramSize, void *romData, con
             break;
 
         case RamTerminationWriteIgnore:
-            ERR("termination not supported");
+            if (!memRegionAdd(mem, RAM_BASE + ramSize, RAM_WRITE_IGNORE_SIZE,
+                              ramWriteIgnoreAccess, nullptr))
+                ERR("failed to setup RAM termination");
             break;
 
         case RamTerminationNone:
@@ -309,16 +327,21 @@ void SocPXA::OnSetPcmSuspended() {
 
 void SocPXA::OnSdInsert() {
     vsdReset(vSD, sdCardSectorCount());
-    pxaMmcInsert(mmc, vSD);
-    deviceSetSdCardInserted(dev, true);
+    if (deviceUsesPxaMmc(dev)) pxaMmcInsert(mmc, vSD);
+    deviceSetSdCard(dev, vSD);
 }
 
-void SocPXA::OnSdRemount() { pxaMmcInsert(mmc, vSD); }
+void SocPXA::OnSdRemount() {
+    if (deviceUsesPxaMmc(dev))
+        pxaMmcInsert(mmc, vSD);
+    else
+        deviceSetSdCard(dev, vSD);
+}
 
 void SocPXA::OnSdEject() {
     vsdReset(vSD, 0);
-    pxaMmcInsert(mmc, nullptr);
-    deviceSetSdCardInserted(dev, false);
+    if (deviceUsesPxaMmc(dev)) pxaMmcInsert(mmc, nullptr);
+    deviceSetSdCard(dev, nullptr);
 }
 
 void SocPXA::OnTouch(int x, int y) { deviceTouch(dev, x, y); }
@@ -330,7 +353,7 @@ void SocPXA::OnEngageKey(KeyId key, bool down) {
 
 void SocPXA::OnReset() {
     pxaLcdResetPaletteBuffer(lcd);
-    nandResetPageBuffer(nand);
+    if (nand) nandResetPageBuffer(nand);
 }
 
 void SocPXA::OnLoad(SavestateLoader<ChunkType> &loader) {
@@ -467,7 +490,7 @@ void SocPXA::SetupScheduler() {
     // avoid underruns)
     scheduler->ScheduleTask(SCHEDULER_TASK_PCM, 1_sec / PCM_HZ_DISABLED, 1);
 
-    if (deviceI2sConnected()) {
+    if (deviceI2sConnected(deviceType)) {
         // I2S -> run at 44.1 kHz
         scheduler->ScheduleTask(SCHEDULER_TASK_I2S, 1_sec / 44100, 1);
     }

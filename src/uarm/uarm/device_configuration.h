@@ -13,7 +13,8 @@ enum class DisplayMode {
     mode_320x320 = 5,
     mode_320x480 = 6,
     mode_480x480 = 7,
-    mode_480x720 = 8
+    mode_480x720 = 8,
+    mode_320x320_noGraffiti = 9
 };
 
 struct DisplayConfiguration {

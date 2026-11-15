@@ -19,6 +19,7 @@
 #include "pxa_SSP.h"
 #include "pxa_UART.h"
 #include "reschedule.h"
+#include "savestate/savestateAll.h"
 #include "vSD.h"
 
 #define DEVICE_PERIODIC_TIER0 0
@@ -56,37 +57,86 @@ enum RamTermination {  // what's after ram in phys map? (some devices probe)
     RamTerminationNone,
 };
 
-struct Device;
 struct MemoryBuffer;
+struct PenTranslation;
+
+// Base class for the emulated handhelds. Each device lives in its own devicePalm*.cpp and is
+// created by deviceSetup().
+struct Device {
+    explicit Device(enum DeviceType5 type) : type(type) {}
+    virtual ~Device() = default;
+
+    enum DeviceType5 GetType() const { return type; }
+
+    virtual void Key(uint32_t key, bool down) {}
+    virtual void Periodic(uint32_t tier) {}
+    virtual void PcmPeriodic() {}
+    virtual void Touch(int x, int y) = 0;
+    virtual bool TaskRequired(uint32_t tier) { return tier != DEVICE_PERIODIC_TIER0; }
+    virtual void SetAudioQueue(struct AudioQueue *audioQueue) {}
+
+    // true if the SD card is wired to the PXA MMC controller (the default)
+    virtual bool UsesPxaMmc() const { return true; }
+    // vsd is nullptr if no card is inserted
+    virtual void SetSdCard(struct VSD *vsd) {}
+
+    virtual void Save(Savestate<ChunkType> &savestate) = 0;
+    virtual void Save(SavestateProbe<ChunkType> &savestate) = 0;
+    virtual void Load(SavestateLoader<ChunkType> &loader) = 0;
+
+   private:
+    enum DeviceType5 type;
+};
 
 // simple queries
-enum RamTermination deviceGetRamTerminationStyle(void);
-uint_fast8_t deviceGetSocRev(void);
+enum RamTermination deviceGetRamTerminationStyle(enum DeviceType5 type);
+uint_fast8_t deviceGetSocRev(enum DeviceType5 type);
+bool deviceI2sConnected(enum DeviceType5 type);
+
+// Mapping between the raw pen coordinates seen by the OS and screen coordinates. Used to
+// bypass digitizer calibration.
+const struct PenTranslation *deviceGetPenTranslation(enum DeviceType5 type);
 
 // device handling
 struct Device *deviceSetup(enum DeviceType5 type, struct SocPeriphs *sp,
                            struct Reschedule reschedule, struct GetEmuTime getEmuTime,
                            struct Keypad *kp, struct VSD *vsd, uint8_t *nandContent,
                            size_t nandSize, const struct MemoryBuffer *nandPageBuffer);
-void deviceKey(struct Device *dev, uint32_t key, bool down);
-void devicePeriodic(struct Device *dev, uint32_t tier);
-void devicePcmPeriodic(struct Device *dev);
-void deviceTouch(struct Device *dev, int x, int y);
 
-bool deviceTaskRequired(struct Device *dev, uint32_t tier);
+// per-device constructors, see devicePalm*.cpp
+struct Device *deviceSetupTungstenE2(enum DeviceType5 type, struct SocPeriphs *sp,
+                                     struct Reschedule reschedule, struct GetEmuTime getEmuTime,
+                                     struct Keypad *kp, struct VSD *vsd, uint8_t *nandContent,
+                                     size_t nandSize, const struct MemoryBuffer *nandPageBuffer);
+struct Device *deviceSetupTungstenC(struct SocPeriphs *sp, struct Keypad *kp);
+struct Device *deviceSetupTungstenT3(struct SocPeriphs *sp, struct Keypad *kp);
 
-void deviceSetAudioQueue(struct Device *dev, struct AudioQueue *audioQueue);
+inline void deviceKey(struct Device *dev, uint32_t key, bool down) { dev->Key(key, down); }
+inline void devicePeriodic(struct Device *dev, uint32_t tier) { dev->Periodic(tier); }
+inline void devicePcmPeriodic(struct Device *dev) { dev->PcmPeriodic(); }
+inline void deviceTouch(struct Device *dev, int x, int y) { dev->Touch(x, y); }
 
-bool deviceI2sConnected();
+inline bool deviceTaskRequired(struct Device *dev, uint32_t tier) {
+    return dev->TaskRequired(tier);
+}
 
-void deviceSetSdCardInserted(struct Device *dev, bool inserted);
+inline void deviceSetAudioQueue(struct Device *dev, struct AudioQueue *audioQueue) {
+    dev->SetAudioQueue(audioQueue);
+}
 
-enum DeviceType5 deviceGetType(struct Device *dev);
+inline bool deviceUsesPxaMmc(struct Device *dev) { return dev->UsesPxaMmc(); }
+inline void deviceSetSdCard(struct Device *dev, struct VSD *vsd) { dev->SetSdCard(vsd); }
+
+inline enum DeviceType5 deviceGetType(struct Device *dev) { return dev->GetType(); }
 
 template <typename T>
-void deviceSave(struct Device *dev, T &savestate);
+void deviceSave(struct Device *dev, T &savestate) {
+    dev->Save(savestate);
+}
 
 template <typename T>
-void deviceLoad(struct Device *dev, T &loader);
+void deviceLoad(struct Device *dev, T &loader) {
+    dev->Load(loader);
+}
 
 #endif

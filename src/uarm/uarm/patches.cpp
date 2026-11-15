@@ -14,7 +14,16 @@ struct PatchContext {
     struct ArmCpu* cpu;
     struct SyscallDispatch* sd;
     struct SystemState* systemState;
+    struct PenTranslation penTranslation;
 };
+
+static int16_t penRawToScreen(const struct PenAxisTranslation& t, int16_t raw) {
+    return t.screenOffset + (raw - t.rawOffset) * t.den / t.num;
+}
+
+static int16_t penScreenToRaw(const struct PenAxisTranslation& t, int16_t screen) {
+    return t.rawOffset + (screen - t.screenOffset) * t.num / t.den;
+}
 
 static bool headpatch_SysSetAutoOffTime(void* ctx, uint32_t syscall, uint32_t* registers) {
     fprintf(stderr, "overriding auto off %u -> 0\n", registers[0]);
@@ -32,8 +41,8 @@ static bool headpatch_PenRawToScreen(void* ctx, uint32_t syscall, uint32_t* regi
     cpuMemOpExternal(patchContext->cpu, &x, pointP, 2, false);
     cpuMemOpExternal(patchContext->cpu, &y, pointP + 2, 2, false);
 
-    if (x != 0x3fff) x = (x - 280) / 10;
-    if (y != 0x3fff) y = (y - 210) / 7;
+    if (x != 0x3fff) x = penRawToScreen(patchContext->penTranslation.x, x);
+    if (y != 0x3fff) y = penRawToScreen(patchContext->penTranslation.y, y);
 
     cpuMemOpExternal(patchContext->cpu, &x, pointP, 2, true);
     cpuMemOpExternal(patchContext->cpu, &y, pointP + 2, 2, true);
@@ -50,8 +59,8 @@ static bool headpatch_PenScreenToRaw(void* ctx, uint32_t syscall, uint32_t* regi
     cpuMemOpExternal(patchContext->cpu, &x, pointP, 2, false);
     cpuMemOpExternal(patchContext->cpu, &y, pointP + 2, 2, false);
 
-    if (x != 0x3fff) x = 280 + x * 10;
-    if (y != 0x3fff) y = 210 + y * 7;
+    if (x != 0x3fff) x = penScreenToRaw(patchContext->penTranslation.x, x);
+    if (y != 0x3fff) y = penScreenToRaw(patchContext->penTranslation.y, y);
 
     cpuMemOpExternal(patchContext->cpu, &x, pointP, 2, true);
     cpuMemOpExternal(patchContext->cpu, &y, pointP + 2, 2, true);
@@ -101,11 +110,13 @@ static void tailpatch_uiInitialize(void* ctx, uint32_t syscall,
 
 struct PatchContext* registerPatches(struct PatchDispatch* patchDispatch,
                                      struct SyscallDispatch* syscallDispatch, struct ArmCpu* cpu,
-                                     struct SystemState* systemState, uint32_t features) {
+                                     struct SystemState* systemState, uint32_t features,
+                                     const struct PenTranslation* penTranslation) {
     struct PatchContext* ctx = (struct PatchContext*)malloc(sizeof(struct PatchContext));
     ctx->cpu = cpu;
     ctx->sd = syscallDispatch;
     ctx->systemState = systemState;
+    ctx->penTranslation = penTranslation ? *penTranslation : PenTranslation{};
 
     if (features & PATCH_FEATURE_NO_SLEEP) {
         patchDispatchAddPatch(patchDispatch, SYSCALL_SYS_SET_AUTO_OFF_TIME,
@@ -114,7 +125,7 @@ struct PatchContext* registerPatches(struct PatchDispatch* patchDispatch,
         patchDispatchAddPatch(patchDispatch, SYSCALL_SYS_SLEEP, headpatch_SysSleep, NULL, ctx);
     }
 
-    if (features & PATCH_FEATURE_TOUCH_TRANSLATION) {
+    if ((features & PATCH_FEATURE_TOUCH_TRANSLATION) && penTranslation) {
         patchDispatchAddPatch(patchDispatch, SYSCALL_HAL_PEN_RAW_TO_SCREEN,
                               headpatch_PenRawToScreen, NULL, ctx);
 

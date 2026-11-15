@@ -107,7 +107,14 @@ SOURCE_CXX =		 					\
 	uarm/mmiodev_DirectNAND.cpp			\
 	uarm/uartdev_bcm2035.cpp			\
 	uarm/vSD.cpp						\
+	uarm/device.cpp 					\
 	uarm/devicePalmTungstenE2.cpp 		\
+	uarm/devicePalmTungstenC.cpp 		\
+	uarm/devicePalmTungstenT3.cpp 		\
+	uarm/ac97dev_UCB1400.cpp			\
+	uarm/sspdev_TSC210x.cpp			\
+	uarm/i2cdev_TPS65010.cpp			\
+	uarm/mmiodev_W86L488.cpp			\
 	uarm/cp15mmu.cpp 					\
 	uarm/cp15mpu.cpp 					\
 	uarm/memcpy.cpp						\

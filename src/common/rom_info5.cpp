@@ -13,6 +13,8 @@ namespace {
     constexpr uint32_t HAL_ID_DMITRY_TUNGSTEN_E3 = 'DmGR';
     constexpr uint32_t HAL_ID_TUNGSTEN_E2 = 'hspr';
     constexpr uint32_t HAL_ID_PV = 'PvPv';
+    constexpr uint32_t HAL_ID_TUNGSTEN_C = 'MT64';
+    constexpr uint32_t HAL_ID_TUNGSTEN_T3 = 'aAz1';
     constexpr uint32_t COMPANY_ID_PALM = 'Palm';
 
     constexpr uint32_t SIGNATURE = 0xfeedbeef;
@@ -41,6 +43,12 @@ namespace {
             case DeviceType5::deviceTypeFrankenE2:
                 return "Tungsten E3 / Dmitry's Frankenpilot";
 
+            case DeviceType5::deviceTypeTungstenC:
+                return "Tungsten C";
+
+            case DeviceType5::deviceTypeTungstenT3:
+                return "Tungsten T3";
+
             default:
                 return "unknown";
         }
@@ -67,7 +75,14 @@ bool RomInfo5::IsDmitryPatched() const {
 
 bool RomInfo5::NeedsNand() const { return !IsDmitryPatched(); }
 
-bool RomInfo5::NeedsNandPatch() const { return IsDmitryPatched(); }
+bool RomInfo5::NeedsNandPatch() const { return IsDmitryPatched() && !IsNorOnlyDevice(); }
+
+bool RomInfo5::IsNorOnlyDevice() const {
+    const DeviceType5 deviceType = GetDeviceType();
+
+    return deviceType == DeviceType5::deviceTypeTungstenC ||
+           deviceType == DeviceType5::deviceTypeTungstenT3;
+}
 
 bool RomInfo5::SupportsNand() const { return GetHalId() == HAL_ID_PV; }
 
@@ -76,6 +91,8 @@ uint32_t RomInfo5::GetCompanyId() const { return companyId; }
 uint32_t RomInfo5::GetHalId() const { return halId; }
 
 uint32_t RomInfo5::GetRecommendedRamSize() const {
+    if (IsNorOnlyDevice()) return 64ul << 20;
+
     return IsDmitryPatched() ? (32ul << 20) : (16ul << 20);
 }
 
@@ -94,28 +111,49 @@ DeviceType5 RomInfo5::GetDeviceType() const {
         return DeviceType5::deviceTypeFrankenE2;
     }
 
+    if (companyId == COMPANY_ID_PALM && halId == HAL_ID_TUNGSTEN_C) {
+        return DeviceType5::deviceTypeTungstenC;
+    }
+
+    if (companyId == COMPANY_ID_PALM && halId == HAL_ID_TUNGSTEN_T3) {
+        return DeviceType5::deviceTypeTungstenT3;
+    }
+
     return DeviceType5::deviceTypeInvalid;
 }
 
 bool RomInfo5::Parse() {
-    size_t offset = 0;
-    bool signatureFound = false;
     bool error = false;
+    size_t firstValidHeader = 0;
+    bool haveValidHeader = false;
 
-    for (offset = 0; offset + 12 <= size && !signatureFound && !error; offset += 32 * 1024) {
-        uint32_t sig = Read32(offset + 8, error);
-        signatureFound = sig == SIGNATURE;
+    // Some ROMs (Tungsten C) start with a small ROM whose header does not identify the
+    // device, so keep scanning until we find a header for a supported device. If there is
+    // none we fall back to the first valid header.
+    for (size_t offset = 0; offset + 12 <= size && !error; offset += 32 * 1024) {
+        if (Read32(offset + 8, error) != SIGNATURE) continue;
 
-        if (!signatureFound) continue;
+        if (!ParseAt(offset)) continue;
 
-        if (ParseAt(offset)) return true;
+        isValid = true;
+        if (GetDeviceType() != DeviceType5::deviceTypeInvalid) return true;
+
+        if (!haveValidHeader) {
+            haveValidHeader = true;
+            firstValidHeader = offset;
+        }
     }
 
-    return false;
+    isValid = false;
+
+    return haveValidHeader && ParseAt(firstValidHeader);
 }
 
 bool RomInfo5::ParseAt(size_t offset) {
     bool error = false;
+
+    // the header extends up to the end of the ROM name
+    if (offset + 0x8c + 32 > size) return false;
 
     cardName = ReadString(offset + 0x10, 32, error);
     manufacturer = ReadString(offset + 0x30, 32, error);

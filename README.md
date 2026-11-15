@@ -73,6 +73,7 @@ The following devices are currently emulated:
   Dmitry Grinberg)
 - rePalm paravirualized (a paravirtualized version of PalmOS created by Dmitry Grinberg
   that offers substantial performance improvements over emulated read hardware)
+- Tungsten C, Tungsten T3 (native `cp-uarm` app only, see [below](#os5))
 - Handera 330, 330c (the lost color version of the 330)
 - Sony PEG-S300, PEG-S320
 - Sony PEG-S500C series
@@ -196,6 +197,25 @@ Similar to `cloudpilot-emu`, `cp-uarm` provides a CLI and a set of
 command line options, and help is accessible with `--help` on the commandline
 and `help` in the CLI.
 
+`cp-uarm` is started with a NOR ROM image or a saved session:
+
+```
+    $ src/uarm/cp-uarm <rom or session file>
+```
+
+The device is detected from the ROM. In addition to the devices supported by
+the web app, `cp-uarm` can run Tungsten C and Tungsten T3 ROMs:
+
+- The Tungsten C is emulated with 64MB of RAM and a 320x320 display without a
+  graffiti area.
+- The Tungsten T3 is emulated with 64MB of RAM and a 320x480 display with the
+  dynamic input area. The application buttons are mapped to F1 - F4, the
+  5-way navigator to the cursor keys and enter.
+
+On both devices touch input is translated directly to screen coordinates, so
+digitizer calibration during setup always succeeds. See
+[known issues](#known-issues-and-limitations) for the current limitations.
+
 # Reporting issues
 
 Please report issues on the [Github tracker](https://github.com/cloudpilot-emu/cloudpilot-emu/issues).
@@ -226,6 +246,15 @@ Please report issues on the [Github tracker](https://github.com/cloudpilot-emu/c
   the skin suggests otherwise.
 - There is no support for changing the hotsync user name on OS5. Please use
   MultiUserHack or a similar application for that.
+- Tungsten C: only available in the native `cp-uarm` app. Of the keyboard and
+  hardware buttons only the first application button (F1) is mapped, Wi-Fi is
+  not emulated, and boot takes about 30 seconds of emulated time at the default
+  speed of 100 MIPS (the real device runs at 400 MHz, use `--mips` to go
+  faster).
+- Tungsten T3: only available in the native `cp-uarm` app. SD cards are not
+  supported (the SD controller is only partially emulated), there is no
+  audio, and the voice recorder button, the hotsync button and the power
+  button are not mapped.
 
 # Building
 
@@ -309,6 +338,31 @@ On Fedora
 ```
     $ dnf install readline-devel libcurl-devel SDL2_image-devel SDL2-devel
 ```
+
+On MacOS, install the dependencies with [Homebrew](https://brew.sh)
+
+```
+    $ brew install sdl2 sdl2_image readline curl
+```
+
+MacOS ships libedit in place of GNU readline, and the build fails against it.
+Homebrew installs readline and curl "keg-only", so you need to add their paths
+in `src/Makefile.local` (see `src/Makefile.local.example`):
+
+```
+INCLUDE_EXTRA = -I/opt/homebrew/include -I/opt/homebrew/opt/readline/include \
+	-I/opt/homebrew/opt/curl/include
+
+LDFLAGS_NATIVE = \
+	$(shell sdl2-config --libs) -lSDL2_image -lreadline -pthread -lresolv -lcurl \
+	-L/opt/homebrew/lib -L/opt/homebrew/opt/readline/lib -L/opt/homebrew/opt/curl/lib
+```
+
+If you leave out the curl paths, the build links against the system libcurl,
+which lacks websocket support, and the network proxy is disabled.
+
+If you cloned without `--recurse-submodules`, initialize the submodules first
+with `git submodule update --init --recursive`.
 
 The build is accomplished with
 

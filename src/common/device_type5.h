@@ -5,6 +5,8 @@ enum DeviceType5 {
     deviceTypeE2 = 0,
     deviceTypeFrankenE2 = 1,
     deviceTypePV = 2,
+    deviceTypeTungstenC = 3,
+    deviceTypeTungstenT3 = 4,
     deviceTypeInvalid = -1
 };
 

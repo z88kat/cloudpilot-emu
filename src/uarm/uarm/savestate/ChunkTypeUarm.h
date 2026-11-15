@@ -24,6 +24,11 @@ enum class ChunkType : uint32_t {
     pxa255udc = 0x0130,
     wm9712L = 0x0140,
     bcm2035 = 0x0150,
+    ucb1400 = 0x0160,
+    tsc210x = 0x0170,
+    tps65010 = 0x0180,
+    w86l488 = 0x0190,
+    deviceTungstenC = 0x01a0,
 
     pvIc = 0x1000,
     pvTimer = 0x1010,

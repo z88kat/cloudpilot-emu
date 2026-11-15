@@ -13,6 +13,10 @@ bool deviceConfigurationSupportsRamSize(enum DeviceType5 deviceType, uint32_t ra
         case DeviceType5::deviceTypePV:
             return (1ul << __builtin_ctz(ramSize)) == ramSize && ramSize >= 8 << 20;
 
+        case DeviceType5::deviceTypeTungstenC:
+        case DeviceType5::deviceTypeTungstenT3:
+            return ramSize == (64ul << 20);
+
         default:
             return false;
     }
@@ -38,7 +42,13 @@ bool deviceConfigurationDeviceSupportsDisplayMode(DeviceType5 deviceType, Displa
             return displayMode == DisplayMode::mode_320x480;
 
         case DeviceType5::deviceTypePV:
-            return true;
+            return displayMode != DisplayMode::mode_320x320_noGraffiti;
+
+        case DeviceType5::deviceTypeTungstenC:
+            return displayMode == DisplayMode::mode_320x320_noGraffiti;
+
+        case DeviceType5::deviceTypeTungstenT3:
+            return displayMode == DisplayMode::mode_320x480;
 
         default:
             return false;
@@ -49,7 +59,11 @@ DisplayMode deviceConfigurationDefaultDisplayMode(DeviceType5 deviceType) {
     switch (deviceType) {
         case DeviceType5::deviceTypeFrankenE2:
         case DeviceType5::deviceTypePV:
+        case DeviceType5::deviceTypeTungstenT3:
             return DisplayMode::mode_320x480;
+
+        case DeviceType5::deviceTypeTungstenC:
+            return DisplayMode::mode_320x320_noGraffiti;
 
         default:
             return DisplayMode::mode_320x320;
@@ -81,6 +95,9 @@ DisplayConfiguration deviceConfigurationDisplayConfigForMode(DisplayMode mode) {
 
         case DisplayMode::mode_480x720:
             return {.width = 480, .height = 720, .graffitiHeight = 0, .density = 216};
+
+        case DisplayMode::mode_320x320_noGraffiti:
+            return {.width = 320, .height = 320, .graffitiHeight = 0, .density = 144};
 
         default:
             return DisplayConfiguration{};

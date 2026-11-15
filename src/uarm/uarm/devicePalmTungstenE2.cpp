@@ -102,166 +102,147 @@
 */
 // clang-format on
 
-struct Device {
-    struct WM9712L *wm9712L;
-    struct DirectNAND *nand;
-    struct Bcm2035 *bcm2035;
-    struct PxaGpio *gpio;
+namespace {
+    class DeviceTungstenE2 : public Device {
+       public:
+        DeviceTungstenE2(enum DeviceType5 type, struct SocPeriphs *sp,
+                         struct Reschedule reschedule, struct GetEmuTime getTime,
+                         struct Keypad *kp, uint8_t *nandContent, size_t nandSize,
+                         const struct MemoryBuffer *pageBuffer);
 
-    struct Reschedule reschedule;
+        void Periodic(uint32_t tier) override {
+            if (tier == DEVICE_PERIODIC_TIER0) directNandPeriodic(nand);
+        }
 
-    enum DeviceType5 type;
-};
+        void PcmPeriodic() override { wm9712Lperiodic(wm9712L); }
 
-enum RamTermination deviceGetRamTerminationStyle(void) { return RamTerminationMirror; }
+        void Touch(int x, int y) override {
+            wm9712LsetPen(wm9712L, (x >= 0 && y >= 0) ? 280 + 10 * x : -1,
+                          (x >= 0 && y >= 0) ? 210 + 7 * y : -1, 1000);
+        }
 
-uint_fast8_t deviceGetSocRev(void) {
-    return 0;  // PXA25x
-}
+        bool TaskRequired(uint32_t tier) override {
+            return tier == DEVICE_PERIODIC_TIER0 ? directNandTaskRequired(nand) : true;
+        }
 
-static void devicePrvReschedule(void *ctx, uint32_t task) {
-    struct Device *dev = (struct Device *)ctx;
+        void SetAudioQueue(struct AudioQueue *audioQueue) override {
+            wm9712LsetAudioQueue(wm9712L, audioQueue);
+        }
 
-    if (task == RESCHEDULE_TASK_NAND)
-        dev->reschedule.rescheduleCb(dev->reschedule.ctx, RESCHEDULE_TASK_DEVICE_TIER0);
-}
+        void SetSdCard(struct VSD *vsd) override { pxaGpioSetState(gpio, 10, !vsd); }
 
-struct Device *deviceSetup(enum DeviceType5 type, struct SocPeriphs *sp,
-                           struct Reschedule reschedule, struct GetEmuTime getTime,
-                           struct Keypad *kp, struct VSD *vsd, uint8_t *nandContent,
-                           size_t nandSize, const struct MemoryBuffer *pageBuffer) {
-    static const struct NandSpecs nandSpecs = {
-        .bytesPerPage = 528,
-        .blocksPerDevice = 2048,
-        .pagesPerBlockLg2 = 5,
-        .flags = NAND_FLAG_SAMSUNG_ADDRESSED_VIA_AREAS,
-        .devIdLen = 2,
-        .devId = {0xec, 0x75},
+        void Save(Savestate<ChunkType> &savestate) override { DoSave(savestate); }
+        void Save(SavestateProbe<ChunkType> &savestate) override { DoSave(savestate); }
+
+        void Load(SavestateLoader<ChunkType> &loader) override {
+            wm9712Load(wm9712L, loader);
+            directNandLoad(nand, loader);
+            bcm2035Load(bcm2035, loader);
+        }
+
+       private:
+        template <typename T>
+        void DoSave(T &savestate) {
+            wm9712Lsave(wm9712L, savestate);
+            directNandSave(nand, savestate);
+            bcm2035Save(bcm2035, savestate);
+        }
+
+        static void PrvReschedule(void *ctx, uint32_t task);
+
+       private:
+        struct WM9712L *wm9712L;
+        struct DirectNAND *nand;
+        struct Bcm2035 *bcm2035;
+        struct PxaGpio *gpio;
+
+        struct Reschedule reschedule;
     };
 
-    struct Device *dev;
+    void DeviceTungstenE2::PrvReschedule(void *ctx, uint32_t task) {
+        auto *dev = reinterpret_cast<DeviceTungstenE2 *>(ctx);
 
-    dev = (struct Device *)malloc(sizeof(*dev));
-    if (!dev) ERR("cannot alloc device");
-
-    dev->type = type;
-
-    dev->gpio = sp->gpio;
-
-    struct Reschedule deviceReschedule = {.rescheduleCb = devicePrvReschedule, .ctx = dev};
-
-    dev->reschedule = reschedule;
-
-    dev->wm9712L = wm9712LInit(sp->ac97, sp->gpio, 50);
-    if (!dev->wm9712L) ERR("Cannot init WM9712L");
-
-    dev->bcm2035 = bcm2035Init(getTime);
-
-    dev->nand =
-        directNandInit(sp->mem, deviceReschedule, 0x04000002UL, 0x04000004UL, 0x04000000UL,
-                       0x00fffff9ul, sp->gpio, 79, &nandSpecs, nandContent, nandSize, pageBuffer);
-    if (!dev->nand) ERR("Cannot init NAND");
-
-    if (!keypadAddGpioKey(kp, keyIdHard1, 11, false)) ERR("Cannot init hardkey1 (datebook)\n");
-
-    if (!keypadAddGpioKey(kp, keyIdHard2, 13, false)) ERR("Cannot init hardkey2 (address)\n");
-
-    if (!keypadAddGpioKey(kp, keyIdHard3, 7, false)) ERR("Cannot init hardkey3 (ToDo)\n");
-
-    if (!keypadAddGpioKey(kp, keyIdHard4, 5, false)) ERR("Cannot init hardkey4 (Memos)\n");
-
-    if (!keypadAddGpioKey(kp, keyIdDown, 21, false)) ERR("Cannot init down key\n");
-
-    if (!keypadAddGpioKey(kp, keyIdUp, 22, false)) ERR("Cannot init up key\n");
-
-    if (!keypadAddGpioKey(kp, keyIdLeft, 19, false)) ERR("Cannot init left key\n");
-
-    if (!keypadAddGpioKey(kp, keyIdRight, 20, false)) ERR("Cannot init right key\n");
-
-    if (!keypadAddGpioKey(kp, keyIdSelect, 14, false)) ERR("Cannot init select key\n");
-
-    if (!keypadAddGpioKey(kp, keyIdPower, 2, false))  // XXX: change this to tru eot boot with
-                                                      // poewr key inverted. press ESC to release.
-        ERR("Cannot init power key\n");
-
-    sp->gpio = sp->gpio;
-
-    pxaGpioSetState(sp->gpio, 1, true);  // reset button
-
-    pxaGpioSetState(sp->gpio, 4,
-                    true);  // not in cradle (also prevents FIQ wtchdog from firing after 5 sec)
-
-    pxaGpioSetState(sp->gpio, 40, true);  // no hotsync button pressed [??]
-
-    pxaGpioSetState(sp->gpio, 12, false);  // no headphones [??]
-
-    pxaGpioSetState(sp->gpio, 52, true);  // no manufacturing test mode please
-
-    wm9712LsetAuxVoltage(dev->wm9712L, WM9712LauxPinBmon, 4200 / 3);  // main battery is 4.2V
-
-    deviceSetSdCardInserted(dev, false);
-
-    // yes, this is really swapped
-    sp->dbgUart = sp->uarts[3];  // BTUART
-    sp->btUart = sp->uarts[1];   // HWUART
-
-    sp->nand = directNandGetNand(dev->nand);
-    bcm2035RegisterWithUart(dev->bcm2035, sp->btUart);
-
-    return dev;
-}
-
-void devicePeriodic(struct Device *dev, uint32_t tier) {
-    if (tier == DEVICE_PERIODIC_TIER0) directNandPeriodic(dev->nand);
-}
-
-void devicePcmPeriodic(struct Device *dev) { wm9712Lperiodic(dev->wm9712L); }
-
-void deviceTouch(struct Device *dev, int x, int y) {
-    wm9712LsetPen(dev->wm9712L, (x >= 0 && y >= 0) ? 280 + 10 * x : -1,
-                  (x >= 0 && y >= 0) ? 210 + 7 * y : -1, 1000);
-}
-
-void deviceKey(struct Device *dev, uint32_t key, bool down) {
-    // nothing
-}
-
-bool deviceTaskRequired(struct Device *dev, uint32_t tier) {
-    if (tier == DEVICE_PERIODIC_TIER0) {
-        return directNandTaskRequired(dev->nand);
-    } else {
-        return true;
+        if (task == RESCHEDULE_TASK_NAND)
+            dev->reschedule.rescheduleCb(dev->reschedule.ctx, RESCHEDULE_TASK_DEVICE_TIER0);
     }
+
+    DeviceTungstenE2::DeviceTungstenE2(enum DeviceType5 type, struct SocPeriphs *sp,
+                                       struct Reschedule reschedule, struct GetEmuTime getTime,
+                                       struct Keypad *kp, uint8_t *nandContent, size_t nandSize,
+                                       const struct MemoryBuffer *pageBuffer)
+        : Device(type), gpio(sp->gpio), reschedule(reschedule) {
+        static const struct NandSpecs nandSpecs = {
+            .bytesPerPage = 528,
+            .blocksPerDevice = 2048,
+            .pagesPerBlockLg2 = 5,
+            .flags = NAND_FLAG_SAMSUNG_ADDRESSED_VIA_AREAS,
+            .devIdLen = 2,
+            .devId = {0xec, 0x75},
+        };
+
+        struct Reschedule deviceReschedule = {.rescheduleCb = PrvReschedule, .ctx = this};
+
+        wm9712L = wm9712LInit(sp->ac97, sp->gpio, 50);
+        if (!wm9712L) ERR("Cannot init WM9712L");
+
+        bcm2035 = bcm2035Init(getTime);
+
+        nand = directNandInit(sp->mem, deviceReschedule, 0x04000002UL, 0x04000004UL,
+                              0x04000000UL, 0x00fffff9ul, sp->gpio, 79, &nandSpecs, nandContent,
+                              nandSize, pageBuffer);
+        if (!nand) ERR("Cannot init NAND");
+
+        if (!keypadAddGpioKey(kp, keyIdHard1, 11, false))
+            ERR("Cannot init hardkey1 (datebook)\n");
+
+        if (!keypadAddGpioKey(kp, keyIdHard2, 13, false))
+            ERR("Cannot init hardkey2 (address)\n");
+
+        if (!keypadAddGpioKey(kp, keyIdHard3, 7, false)) ERR("Cannot init hardkey3 (ToDo)\n");
+
+        if (!keypadAddGpioKey(kp, keyIdHard4, 5, false)) ERR("Cannot init hardkey4 (Memos)\n");
+
+        if (!keypadAddGpioKey(kp, keyIdDown, 21, false)) ERR("Cannot init down key\n");
+
+        if (!keypadAddGpioKey(kp, keyIdUp, 22, false)) ERR("Cannot init up key\n");
+
+        if (!keypadAddGpioKey(kp, keyIdLeft, 19, false)) ERR("Cannot init left key\n");
+
+        if (!keypadAddGpioKey(kp, keyIdRight, 20, false)) ERR("Cannot init right key\n");
+
+        if (!keypadAddGpioKey(kp, keyIdSelect, 14, false)) ERR("Cannot init select key\n");
+
+        // XXX: change this to true to boot with power key inverted. press ESC to release.
+        if (!keypadAddGpioKey(kp, keyIdPower, 2, false)) ERR("Cannot init power key\n");
+
+        pxaGpioSetState(sp->gpio, 1, true);  // reset button
+
+        // not in cradle (also prevents FIQ wtchdog from firing after 5 sec)
+        pxaGpioSetState(sp->gpio, 4, true);
+
+        pxaGpioSetState(sp->gpio, 40, true);  // no hotsync button pressed [??]
+
+        pxaGpioSetState(sp->gpio, 12, false);  // no headphones [??]
+
+        pxaGpioSetState(sp->gpio, 52, true);  // no manufacturing test mode please
+
+        wm9712LsetAuxVoltage(wm9712L, WM9712LauxPinBmon, 4200 / 3);  // main battery is 4.2V
+
+        SetSdCard(nullptr);
+
+        // yes, this is really swapped
+        sp->dbgUart = sp->uarts[3];  // BTUART
+        sp->btUart = sp->uarts[1];   // HWUART
+
+        sp->nand = directNandGetNand(nand);
+        bcm2035RegisterWithUart(bcm2035, sp->btUart);
+    }
+}  // namespace
+
+struct Device *deviceSetupTungstenE2(enum DeviceType5 type, struct SocPeriphs *sp,
+                                     struct Reschedule reschedule, struct GetEmuTime getEmuTime,
+                                     struct Keypad *kp, struct VSD *vsd, uint8_t *nandContent,
+                                     size_t nandSize, const struct MemoryBuffer *nandPageBuffer) {
+    return new DeviceTungstenE2(type, sp, reschedule, getEmuTime, kp, nandContent, nandSize,
+                                nandPageBuffer);
 }
-
-void deviceSetAudioQueue(struct Device *dev, struct AudioQueue *audioQueue) {
-    wm9712LsetAudioQueue(dev->wm9712L, audioQueue);
-}
-
-bool deviceI2sConnected() { return false; }
-
-void deviceSetSdCardInserted(struct Device *dev, bool inserted) {
-    pxaGpioSetState(dev->gpio, 10, !inserted);
-}
-
-enum DeviceType5 deviceGetType(struct Device *dev) { return dev->type; }
-
-template <typename T>
-void deviceSave(struct Device *dev, T &savestate) {
-    wm9712Lsave(dev->wm9712L, savestate);
-    directNandSave(dev->nand, savestate);
-    bcm2035Save(dev->bcm2035, savestate);
-}
-
-template <typename T>
-void deviceLoad(struct Device *dev, T &loader) {
-    wm9712Load(dev->wm9712L, loader);
-    directNandLoad(dev->nand, loader);
-    bcm2035Load(dev->bcm2035, loader);
-}
-
-template void deviceSave<Savestate<ChunkType>>(Device *dev, Savestate<ChunkType> &savestate);
-template void deviceSave<SavestateProbe<ChunkType>>(Device *dev,
-                                                    SavestateProbe<ChunkType> &savestate);
-template void deviceLoad<SavestateLoader<ChunkType>>(Device *dev,
-                                                     SavestateLoader<ChunkType> &loader);

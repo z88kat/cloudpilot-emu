@@ -88,6 +88,7 @@ class SocPXA : public SocGeneric<SocPXA> {
 
    private:
     uint8_t socRev{0};
+    DeviceType5 deviceType{DeviceType5::deviceTypeInvalid};
 
     PxaUart *ffUart{nullptr}, *hwUart{nullptr}, *stUart{nullptr}, *btUart{nullptr};
     PxaSsp *ssp[3]{nullptr, nullptr, nullptr};

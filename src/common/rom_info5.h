@@ -34,6 +34,7 @@ class RomInfo5 {
     bool ParseAt(size_t offset);
 
     bool IsDmitryPatched() const;
+    bool IsNorOnlyDevice() const;
 
     uint32_t Read32(size_t offset, bool& error) const;
     std::string ReadString(size_t offset, uint8_t maxLen, bool& error) const;

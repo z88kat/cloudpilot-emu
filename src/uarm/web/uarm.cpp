@@ -117,7 +117,7 @@ bool Uarm::Launch(unsigned int romSize, void* romData) {
 
               static_cast<SoC*>(new SocPXA(deviceType, ramSize, romData, romSize,
                                            nandData ? nandData : nandStub.get(),
-                                           nandData ? nandSize : NAND_SIZE, 0, deviceGetSocRev()));
+                                           nandData ? nandSize : NAND_SIZE, 0, deviceGetSocRev(deviceType)));
 
     audioQueue = audioQueueCreate(AUDIO_QUEUE_SIZE);
     soc->SetAudioQueue(audioQueue);

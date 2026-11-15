@@ -253,7 +253,7 @@ namespace {
                 ? static_cast<SoC*>(new SocPV(ramSize, nor.data, nor.size, *displayMode, gdbPort))
                 : static_cast<SoC*>(new SocPXA(deviceType, ramSize, nor.data, nor.size,
                                                reinterpret_cast<uint8_t*>(nand.data), nand.size,
-                                               gdbPort, deviceGetSocRev()));
+                                               gdbPort, deviceGetSocRev(deviceType)));
 
         if (memory.data && memory.size > soc->GetMemoryData().size) {
             cerr << "RAM size mismatch" << endl;
@@ -377,7 +377,7 @@ namespace {
 int main(int argc, char** argv) {
     argparse::ArgumentParser program("cp-uarm");
 
-    program.add_description("cp-uarm emulates a Palm Tungsten E2");
+    program.add_description("cp-uarm emulates a Palm Tungsten E2, Tungsten C or Tungsten T3");
 
     program.add_argument("nor_or_session").help("NOR rom or saved session").required();
 
@@ -386,7 +386,7 @@ int main(int argc, char** argv) {
     program.add_argument("--sd", "-s").help("SD card file").metavar("<SD card file>");
 
     program.add_argument("--ram-size")
-        .help("RAM size in MB (16 or 32)")
+        .help("RAM size in MB (16 or 32 on the E2, 64 on the TC and T3)")
         .metavar("<size>")
         .scan<'u', unsigned int>();
     ;
